@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Minecraft 1.4 - Web Edition</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+    canvas { display: block; }
+
+    #overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: #fff; z-index: 100;
+    }
+    #overlay h1 {
+      font-size: 3rem; color: #4a4; text-shadow: 3px 3px #000, -1px -1px #2a2;
+      margin-bottom: 8px; letter-spacing: 3px;
+    }
+    #overlay p { color: #aaa; margin-bottom: 30px; font-size: 0.9rem; }
+    #overlay button {
+      padding: 14px 40px; font-size: 1.2rem;
+      background: #5a5; border: 3px solid #373; color: #fff;
+      cursor: pointer; text-shadow: 1px 1px #000;
+      font-family: 'Courier New', monospace;
+    }
+    #overlay button:hover { background: #6b6; }
+
+    #hud {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      display: none; flex-direction: column; align-items: center;
+      pointer-events: none; z-index: 50;
+    }
+    #hotbar {
+      display: flex; gap: 4px;
+      background: rgba(0,0,0,0.5);
+      border: 2px solid #555; padding: 4px;
+      margin-bottom: 8px;
+    }
+    .slot {
+      width: 50px; height: 50px;
+      border: 2px solid #777;
+      background: rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.65rem; color: #fff; flex-direction: column;
+      position: relative;
+    }
+    .slot.active { border-color: #fff; background: rgba(255,255,255,0.15); }
+    .slot-icon { font-size: 1.4rem; }
+
+    #crosshair {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      color: #fff; font-size: 1.5rem;
+      text-shadow: 1px 1px 2px #000;
+      pointer-events: none; z-index: 50;
+    }
+
+    #info {
+      position: fixed; top: 10px; left: 10px;
+      color: #fff; font-size: 0.75rem;
+      text-shadow: 1px 1px #000;
+      pointer-events: none; z-index: 50;
+      display: none;
+    }
+
+    #paused {
+      position: fixed; inset: 0;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.5); z-index: 80; color: #fff;
+      font-size: 2rem; text-shadow: 2px 2px #000;
+    }
+  </style>
+</head>
+<body>
+
+<div id="overlay">
+  <h1>⛏ MINECRAFT 1.4</h1>
+  <p>Web Edition — Three.js Powered</p>
+  <button onclick="startGame()">Oyna (Play)</button>
+  <br><br>
+  <small style="color:#666">
+    WASD: Hareket &nbsp;|&nbsp; Space: Zıpla &nbsp;|&nbsp; Sol Tık: Kır &nbsp;|&nbsp; Sağ Tık: Yerleştir<br>
+    1-9: Blok Seç &nbsp;|&nbsp; ESC: Duraklat
+  </small>
+</div>
+
+<div id="paused">⏸ DURAKLATILDI — ESC ile devam</div>
+<div id="crosshair">+</div>
+
+<div id="hud">
+  <div id="hotbar"></div>
+</div>
+
+<div id="info">
+  <div id="pos-info"></div>
+  <div id="block-info"></div>
+  <div id="fps-info"></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ── Block definitions ──────────────────────────────────────────────────────────
+const BLOCKS = {
+  1: { name: 'Çim',    color: 0x5a8a3c, top: 0x4a7a2c, side: 0x8b6914, emoji: '🟩' },
+  2: { name: 'Toprak', color: 0x8b6914, top: 0x8b6914, side: 0x8b6914, emoji: '🟫' },
+  3: { name: 'Taş',    color: 0x888888, top: 0x888888, side: 0x888888, emoji: '⬜' },
+  4: { name: 'Kum',    color: 0xdbc96a, top: 0xdbc96a, side: 0xdbc96a, emoji: '🟡' },
+  5: { name: 'Ahşap',  color: 0x8b6508, top: 0x6b4e08, side: 0x8b6508, emoji: '🟧' },
+  6: { name: 'Yaprak', color: 0x2d7a1e, top: 0x2d7a1e, side: 0x2d7a1e, emoji: '🌿' },
+  7: { name: 'Granit', color: 0x955c5c, top: 0x955c5c, side: 0x955c5c, emoji: '🔴' },
+  8: { name: 'Cam',    color: 0xaaddff, top: 0xaaddff, side: 0xaaddff, emoji: '🔷', transparent: true },
+  9: { name: 'Elmas',  color: 0x00e5ff, top: 0x00e5ff, side: 0x00e5ff, emoji: '💎' },
+};
+
+const HOTBAR = [1,2,3,4,5,6,7,8,9];
+let selectedSlot = 0;
+
+// ── Scene setup ────────────────────────────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 40, 100);
+
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 200);
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// Lighting
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(50, 100, 50);
+sun.castShadow = true;
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0x404040, 0.8));
+
+// ── World storage ──────────────────────────────────────────────────────────────
+const world = new Map(); // "x,y,z" -> blockId
+const meshMap = new Map(); // "x,y,z" -> mesh
+
+function key(x, y, z) { return `${x},${y},${z}`; }
+
+function getBlock(x, y, z) { return world.get(key(x,y,z)) || 0; }
+
+function setBlock(x, y, z, id) {
+  const k = key(x,y,z);
+  if (id === 0) {
+    world.delete(k);
+    const m = meshMap.get(k);
+    if (m) { scene.remove(m); m.geometry.dispose(); meshMap.delete(k); }
+  } else {
+    world.set(k, id);
+    createBlockMesh(x, y, z, id);
+  }
+}
+
+// Shared geometries/materials cache
+const geoCache = new THREE.BoxGeometry(1, 1, 1);
+const matCache = new Map();
+
+function getMat(color, transparent) {
+  const k = `${color}_${transparent}`;
+  if (!matCache.has(k)) {
+    matCache.set(k, new THREE.MeshLambertMaterial({
+      color, transparent: !!transparent, opacity: transparent ? 0.4 : 1,
+    }));
+  }
+  return matCache.get(k);
+}
+
+function createBlockMesh(x, y, z, id) {
+  const k = key(x, y, z);
+  if (meshMap.has(k)) { scene.remove(meshMap.get(k)); meshMap.get(k).geometry.dispose(); }
+  const def = BLOCKS[id];
+  const mesh = new THREE.Mesh(geoCache, getMat(def.color, def.transparent));
+  mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  meshMap.set(k, mesh);
+}
+
+// ── Terrain generation ─────────────────────────────────────────────────────────
+function noise(x, z) {
+  // Simple pseudo-random height
+  const s = Math.sin(x * 0.3 + 1.2) * Math.cos(z * 0.25 + 0.7)
+          + Math.sin(x * 0.1 + z * 0.15) * 0.5
+          + Math.cos(x * 0.05 - z * 0.08) * 0.7;
+  return Math.floor(s * 4);
+}
+
+const WORLD_R = 24;
+const SEA_LEVEL = 6;
+
+function generateTerrain() {
+  for (let x = -WORLD_R; x < WORLD_R; x++) {
+    for (let z = -WORLD_R; z < WORLD_R; z++) {
+      const h = SEA_LEVEL + noise(x, z);
+      for (let y = 0; y <= h; y++) {
+        let id;
+        if (y === h) id = (Math.abs(x) < 5 && Math.abs(z) < 5 && h < SEA_LEVEL+3) ? 4 : 1; // sand near center
+        else if (y >= h - 2) id = 2;
+        else if (y >= h - 5) id = 3;
+        else id = 3;
+        world.set(key(x, y, z), id);
+      }
+    }
+  }
+
+  // Trees
+  const treeSpots = [
+    [8,8],[8,-8],[-8,8],[-8,-8],[14,3],[3,14],[-14,5],[-5,-14],[16,16],[-16,16]
+  ];
+  for (const [tx, tz] of treeSpots) {
+    if (Math.abs(tx) >= WORLD_R || Math.abs(tz) >= WORLD_R) continue;
+    const base = SEA_LEVEL + noise(tx, tz);
+    // Trunk
+    for (let y = base+1; y <= base+5; y++) world.set(key(tx,y,tz), 5);
+    // Leaves
+    for (let lx = -2; lx <= 2; lx++) for (let lz = -2; lz <= 2; lz++) for (let ly = 3; ly <= 5; ly++) {
+      if (Math.abs(lx)+Math.abs(lz)+Math.abs(ly-4) > 3) continue;
+      const lk = key(tx+lx, base+ly, tz+lz);
+      if (!world.has(lk)) world.set(lk, 6);
+    }
+  }
+
+  // Build all meshes
+  for (const [k, id] of world) {
+    const [x,y,z] = k.split(',').map(Number);
+    createBlockMesh(x, y, z, id);
+  }
+}
+
+// ── Player physics ─────────────────────────────────────────────────────────────
+const playerPos = new THREE.Vector3(0, SEA_LEVEL + 5, 0);
+const velocity = new THREE.Vector3();
+const GRAVITY = -20;
+const JUMP_VEL = 8;
+const SPEED = 5;
+const PLAYER_HEIGHT = 1.7;
+let onGround = false;
+let yaw = 0, pitch = 0;
+
+const keys = {};
+document.addEventListener('keydown', e => { keys[e.code] = true; });
+document.addEventListener('keyup',   e => { keys[e.code] = false; });
+
+function isBlockAt(x, y, z) {
+  return getBlock(Math.floor(x), Math.floor(y), Math.floor(z)) !== 0;
+}
+
+function playerCollides(pos) {
+  // AABB: 0.6 wide, 1.8 tall
+  const hw = 0.3;
+  for (let dx of [-hw, hw]) for (let dz of [-hw, hw]) for (let dy of [0, 0.9, 1.79]) {
+    if (isBlockAt(pos.x+dx, pos.y+dy, pos.z+dz)) return true;
+  }
+  return false;
+}
+
+function updatePlayer(dt) {
+  if (!pointerLocked) return;
+
+  // Horizontal movement
+  const dir = new THREE.Vector3();
+  if (keys['KeyW']) dir.z -= 1;
+  if (keys['KeyS']) dir.z += 1;
+  if (keys['KeyA']) dir.x -= 1;
+  if (keys['KeyD']) dir.x += 1;
+  dir.normalize();
+
+  const cos = Math.cos(yaw), sin = Math.sin(yaw);
+  const moveX = dir.x * cos - dir.z * sin;
+  const moveZ = dir.x * sin + dir.z * cos;
+
+  const newPosX = playerPos.clone();
+  newPosX.x += moveX * SPEED * dt;
+  if (!playerCollides(newPosX)) playerPos.x = newPosX.x;
+
+  const newPosZ = playerPos.clone();
+  newPosZ.z += moveZ * SPEED * dt;
+  if (!playerCollides(newPosZ)) playerPos.z = newPosZ.z;
+
+  // Gravity & jump
+  if (keys['Space'] && onGround) velocity.y = JUMP_VEL;
+  velocity.y += GRAVITY * dt;
+  const newPosY = playerPos.clone();
+  newPosY.y += velocity.y * dt;
+
+  onGround = false;
+  if (!playerCollides(newPosY)) {
+    playerPos.y = newPosY.y;
+  } else {
+    if (velocity.y < 0) onGround = true;
+    velocity.y = 0;
+  }
+
+  // Prevent falling through world
+  if (playerPos.y < -10) {
+    playerPos.set(0, SEA_LEVEL + 5, 0);
+    velocity.y = 0;
+  }
+
+  camera.position.set(playerPos.x, playerPos.y + PLAYER_HEIGHT, playerPos.z);
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = yaw;
+  camera.rotation.x = pitch;
+}
+
+// ── Mouse look ─────────────────────────────────────────────────────────────────
+let pointerLocked = false;
+document.addEventListener('pointerlockchange', () => {
+  pointerLocked = document.pointerLockElement === renderer.domElement;
+  document.getElementById('paused').style.display = pointerLocked ? 'none' : 'flex';
+});
+document.addEventListener('mousemove', e => {
+  if (!pointerLocked) return;
+  yaw   -= e.movementX * 0.002;
+  pitch -= e.movementY * 0.002;
+  pitch = Math.max(-Math.PI/2 + 0.01, Math.min(Math.PI/2 - 0.01, pitch));
+});
+document.addEventListener('keydown', e => {
+  if (e.code === 'Escape' && pointerLocked) document.exitPointerLock();
+});
+
+// Hotbar slot select
+document.addEventListener('keydown', e => {
+  const n = parseInt(e.key);
+  if (n >= 1 && n <= 9) { selectedSlot = n-1; renderHotbar(); }
+});
+document.addEventListener('wheel', e => {
+  selectedSlot = (selectedSlot + (e.deltaY > 0 ? 1 : -1) + 9) % 9;
+  renderHotbar();
+});
+
+// ── Raycaster for block interaction ────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+raycaster.far = 8;
+
+let highlightMesh = null;
+const highlightGeo = new THREE.BoxGeometry(1.02, 1.02, 1.02);
+const highlightMat = new THREE.MeshBasicMaterial({ color: 0x000000, wireframe: true });
+
+function getTargetBlock() {
+  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+  const meshes = [...meshMap.values()];
+  const hits = raycaster.intersectObjects(meshes);
+  if (!hits.length) return null;
+  const hit = hits[0];
+  const p = hit.point.clone().sub(hit.face.normal.clone().multiplyScalar(0.5));
+  const bx = Math.floor(p.x), by = Math.floor(p.y), bz = Math.floor(p.z);
+  const nx = Math.floor(hit.point.x + hit.face.normal.x * 0.5);
+  const ny = Math.floor(hit.point.y + hit.face.normal.y * 0.5);
+  const nz = Math.floor(hit.point.z + hit.face.normal.z * 0.5);
+  return { bx, by, bz, nx, ny, nz };
+}
+
+function updateHighlight() {
+  const t = getTargetBlock();
+  if (!highlightMesh) {
+    highlightMesh = new THREE.Mesh(highlightGeo, highlightMat);
+    scene.add(highlightMesh);
+  }
+  if (t) {
+    highlightMesh.position.set(t.bx+0.5, t.by+0.5, t.bz+0.5);
+    highlightMesh.visible = true;
+  } else {
+    highlightMesh.visible = false;
+  }
+}
+
+// Break / Place
+document.addEventListener('mousedown', e => {
+  if (!pointerLocked) return;
+  const t = getTargetBlock();
+  if (!t) return;
+  if (e.button === 0) {
+    // Break
+    setBlock(t.bx, t.by, t.bz, 0);
+  } else if (e.button === 2) {
+    // Place — don't place inside player
+    const px = t.nx, py = t.ny, pz = t.nz;
+    const testPos = new THREE.Vector3(px, py, pz);
+    // Make sure not overlapping player
+    const ppx = Math.floor(playerPos.x), ppy = Math.floor(playerPos.y), ppz = Math.floor(playerPos.z);
+    if ((px === ppx && pz === ppz && (py === ppy || py === ppy+1)) ) return;
+    setBlock(px, py, pz, HOTBAR[selectedSlot]);
+  }
+});
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function renderHotbar() {
+  const hb = document.getElementById('hotbar');
+  hb.innerHTML = '';
+  HOTBAR.forEach((bid, i) => {
+    const def = BLOCKS[bid];
+    const div = document.createElement('div');
+    div.className = 'slot' + (i === selectedSlot ? ' active' : '');
+    div.innerHTML = `<span class="slot-icon">${def.emoji}</span><span>${def.name}</span>`;
+    hb.appendChild(div);
+  });
+}
+
+// ── Info overlay ──────────────────────────────────────────────────────────────
+let lastTime = performance.now();
+let frameCount = 0, fps = 0;
+
+function updateInfo() {
+  frameCount++;
+  const now = performance.now();
+  if (now - lastTime > 500) {
+    fps = Math.round(frameCount / ((now - lastTime) / 1000));
+    frameCount = 0;
+    lastTime = now;
+  }
+  const p = playerPos;
+  document.getElementById('pos-info').textContent =
+    `XYZ: ${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}`;
+  document.getElementById('fps-info').textContent = `FPS: ${fps}`;
+  const t = getTargetBlock();
+  document.getElementById('block-info').textContent =
+    t ? `Bakılan: ${BLOCKS[getBlock(t.bx,t.by,t.bz)]?.name || ''}` : '';
+}
+
+// ── Day/night cycle ────────────────────────────────────────────────────────────
+let dayTime = 0;
+function updateSky(dt) {
+  dayTime += dt * 0.02; // 1 full day ≈ 50s
+  const angle = dayTime * Math.PI;
+  const brightness = Math.max(0.1, Math.sin(angle));
+  sun.intensity = brightness * 1.3;
+  const skyColor = new THREE.Color().setHSL(0.6, 0.5, brightness * 0.5 + 0.05);
+  scene.background = skyColor;
+  scene.fog.color = skyColor;
+  sun.position.set(Math.cos(angle) * 100, Math.sin(angle) * 100, 50);
+}
+
+// ── Game loop ─────────────────────────────────────────────────────────────────
+let lastFrame = performance.now();
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = Math.min((now - lastFrame) / 1000, 0.05);
+  lastFrame = now;
+  updatePlayer(dt);
+  updateHighlight();
+  updateSky(dt);
+  updateInfo();
+  renderer.render(scene, camera);
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+window.startGame = function() {
+  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('hud').style.display = 'flex';
+  document.getElementById('info').style.display = 'block';
+  renderHotbar();
+  generateTerrain();
+  // Spawn above terrain
+  const spawnH = SEA_LEVEL + noise(0, 0) + 3;
+  playerPos.set(0, spawnH, 0);
+  renderer.domElement.requestPointerLock();
+  animate();
+};
+
+// ── Resize ────────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
