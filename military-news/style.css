@@ -164,3 +164,4 @@ a { color: var(--accent); }
   #feed { top: auto; height: 34vh; left: 16px; right: 16px; width: auto; bottom: 84px; }
   #status { max-width: calc(100vw - 32px); }
 }
+.untranslated { color: #e0a96d; }

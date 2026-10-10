@@ -170,6 +170,16 @@
     return m ? new Date(Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6])) : new Date();
   }
 
+  // Decode entities and drop a trailing " - Site Name" / " | Site Name".
+  function cleanTitle(t) {
+    t = stripHtml(t);
+    const m = /\s+[-–—|]\s+([^-–—|]{2,40})$/.exec(t);
+    if (m && t.length - m[0].length >= 25) t = t.slice(0, m.index);
+    return t.trim();
+  }
+  // Headline to show: English (original or translated), else the original.
+  const shown = (a) => a.titleEn || a.title;
+
   function addArticle(a) {
     if (!a.url || !a.title) return null;
     const existing = articles.get(a.url);
@@ -177,7 +187,8 @@
       if (a.forcedCountry) existing.queried.add(a.forcedCountry);
       return existing;
     }
-    a.title = a.title.replace(/\s+/g, " ").trim();
+    a.title = cleanTitle(a.title);
+    if (!a.title) return null;
     a.domain = rootDomain(hostOf(a.url) || a.domain);
     a.rep = reputation(a.domain);
     a.needsTranslation = !!a.lang && !/^english$/i.test(a.lang);
@@ -284,9 +295,10 @@
     return n;
   }
   function stripHtml(s) {
-    const d = document.createElement("div");
-    d.innerHTML = String(s || "").replace(/<(script|style)[\s\S]*?<\/\1>/gi, "");
-    return (d.textContent || "").replace(/\s+/g, " ").trim();
+    // DOMParser documents are inert: nothing in the markup runs or loads
+    const d = new DOMParser().parseFromString(String(s || ""), "text/html");
+    d.querySelectorAll("script,style").forEach((n) => n.remove());
+    return (d.body.textContent || "").replace(/\s+/g, " ").trim();
   }
 
   async function loadRss() {
@@ -299,7 +311,30 @@
   }
 
   // ------------------------------------------------------------ translation
-  const TCACHE_KEY = "gmw-translations-v1";
+  // Headlines are grouped by language and sent with the source language set
+  // explicitly (auto-detecting a mixed batch garbles most of it). Requests are
+  // spaced out; when the free endpoint starts refusing, we back off and retry
+  // later instead of giving up. Untranslated headlines are still shown.
+  const GT = "https://translate.googleapis.com/translate_a/single?client=gtx&tl=en&dt=t&sl=";
+  const LANG_CODES = {
+    afrikaans: "af", albanian: "sq", arabic: "ar", armenian: "hy", azerbaijani: "az", basque: "eu",
+    belarusian: "be", bengali: "bn", bosnian: "bs", bulgarian: "bg", catalan: "ca", chinese: "zh-CN",
+    croatian: "hr", czech: "cs", danish: "da", dutch: "nl", estonian: "et", filipino: "tl", finnish: "fi",
+    french: "fr", galician: "gl", georgian: "ka", german: "de", greek: "el", gujarati: "gu", hausa: "ha",
+    hebrew: "iw", hindi: "hi", hungarian: "hu", icelandic: "is", indonesian: "id", irish: "ga",
+    italian: "it", japanese: "ja", kannada: "kn", kazakh: "kk", khmer: "km", korean: "ko", kurdish: "ku",
+    kyrgyz: "ky", lao: "lo", latvian: "lv", lithuanian: "lt", macedonian: "mk", malay: "ms",
+    malayalam: "ml", maltese: "mt", marathi: "mr", mongolian: "mn", burmese: "my", nepali: "ne",
+    norwegian: "no", pashto: "ps", persian: "fa", polish: "pl", portuguese: "pt", punjabi: "pa",
+    romanian: "ro", russian: "ru", serbian: "sr", sinhala: "si", sinhalese: "si", slovak: "sk",
+    slovenian: "sl", somali: "so", spanish: "es", swahili: "sw", swedish: "sv", tajik: "tg", tamil: "ta",
+    telugu: "te", thai: "th", tibetan: "bo", turkish: "tr", turkmen: "tk", ukrainian: "uk", urdu: "ur",
+    uzbek: "uz", vietnamese: "vi", welsh: "cy", yoruba: "yo", zulu: "zu",
+  };
+  const langCode = (name) => LANG_CODES[(name || "").toLowerCase()] || "auto";
+
+  const TCACHE_KEY = "gmw-translations-v2";
+  try { localStorage.removeItem("gmw-translations-v1"); } catch { /* ignore */ }
   let tcache = {};
   try { tcache = JSON.parse(localStorage.getItem(TCACHE_KEY) || "{}"); } catch { tcache = {}; }
   function saveCache() {
@@ -310,76 +345,167 @@
     } catch { /* storage full or blocked – fine */ }
   }
 
+  const MAX_TRIES = 5;
   let translating = false;
-  function queueTranslations() { if (!translating) runTranslations(); }
+  let retryTimer = null;
+  let cooldownUntil = 0;     // Google refused us: pause until then
+  let strikes = 0;
+  function queueTranslations() {
+    clearTimeout(retryTimer);
+    if (!translating) runTranslations();
+  }
+  const awaitingTranslation = (a) => a.needsTranslation && !a.titleEn && !a.tGaveUp;
 
-  async function translateOne(text) {
-    const u = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=" + encodeURIComponent(text);
-    try {
-      const d = await fetchJSON(u, 12000);
-      return d[0].map((seg) => seg[0]).join("");
-    } catch {
-      const d = await fetchJSON("https://api.mymemory.translated.net/get?langpair=autodetect|en&q=" + encodeURIComponent(text.slice(0, 450)), 12000);
-      if (d.responseStatus !== 200) throw new Error("mymemory");
-      return d.responseData.translatedText;
-    }
+  // Is `out` a usable English rendering of `orig`?
+  function goodTranslation(orig, out) {
+    if (!out || !out.trim()) return false;
+    if (/MYMEMORY WARNING|INVALID (SOURCE|TARGET) LANGUAGE|QUERY LENGTH LIMIT/i.test(out)) return false;
+    const letters = out.match(/\p{L}/gu) || [];
+    const latin = out.match(/[A-Za-z]/g) || [];
+    if (letters.length && latin.length / letters.length < 0.6) return false;   // still mostly non-Latin script
+    if (out.trim().toLowerCase() === orig.trim().toLowerCase() && letters.length > 15) return false;
+    return true;
   }
 
-  // Batch several headlines into one request, separated by newlines.
-  async function translateBatch(batch) {
-    const joined = batch.map((a) => a.title.replace(/\n/g, " ")).join("\n");
+  async function google(text, sl) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 15000);
     try {
-      const u = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=" + encodeURIComponent(joined);
-      const d = await fetchJSON(u, 15000);
-      const out = d[0].map((seg) => seg[0]).join("").split("\n").map((s) => s.trim()).filter(Boolean);
-      if (out.length === batch.length) return out;
-    } catch { /* fall through to one-by-one */ }
-    const res = [];
-    for (const a of batch) {
-      try { res.push(await translateOne(a.title)); } catch { res.push(null); }
+      const r = await fetch(GT + encodeURIComponent(sl), {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body: "q=" + encodeURIComponent(text),
+        signal: ctl.signal,
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json();
+      return (d[0] || []).map((seg) => seg[0] || "").join("");
+    } finally { clearTimeout(t); }
+  }
+
+  // Translate same-language headlines in one request, one per line. If the
+  // line count doesn't come back intact, split the batch and try again.
+  async function translateGroup(items, sl) {
+    const out = await google(items.map((a) => a.title.replace(/\n/g, " ")).join("\n"), sl);
+    const lines = out.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length === items.length) return lines;
+    if (items.length === 1) return [lines.join(" ")];
+    const mid = Math.ceil(items.length / 2);
+    return [...await translateGroup(items.slice(0, mid), sl), ...await translateGroup(items.slice(mid), sl)];
+  }
+
+  // Backup service, used for a few important headlines while Google is cooling down.
+  async function myMemory(a) {
+    const code = langCode(a.lang);
+    if (code === "auto") throw new Error("unknown language");
+    const d = await fetchJSON("https://api.mymemory.translated.net/get?langpair=" + encodeURIComponent(code.split("-")[0] + "|en") +
+      "&q=" + encodeURIComponent(a.title.slice(0, 480)), 12000);
+    if (d.responseStatus !== 200 && d.responseStatus !== "200") throw new Error("mymemory " + d.responseStatus);
+    const txt = new DOMParser().parseFromString(d.responseData.translatedText, "text/html").documentElement.textContent;
+    return txt;
+  }
+
+  function priority(a) {
+    let p = -(Date.now() - a.time) / 3600000;              // newer first
+    if (selectedCountry && (a.queried.has(selectedCountry) || a.countries.has(selectedCountry))) p += 1000;
+    if (a.inTop) p += 500;
+    return p;
+  }
+
+  function failed(a) {
+    a.tTries = (a.tTries || 0) + 1;
+    if (a.tTries >= MAX_TRIES) a.tGaveUp = true;
+    else a.tRetryAt = Date.now() + 30000 * a.tTries;
+  }
+
+  async function translateBatch(batch, sl) {
+    try {
+      const out = await translateGroup(batch, sl);
+      strikes = 0;
+      const redo = [];
+      batch.forEach((a, i) => {
+        if (goodTranslation(a.title, out[i])) { tcache[a.title] = out[i]; applyTranslation(a, out[i]); }
+        else if (sl !== "auto" && !a.triedAuto) redo.push(a);   // language label may be wrong
+        else failed(a);
+      });
+      for (const a of redo) {
+        a.triedAuto = true;
+        await sleep(300);
+        try {
+          const [en] = await translateGroup([a], "auto");
+          if (goodTranslation(a.title, en)) { tcache[a.title] = en; applyTranslation(a, en); } else failed(a);
+        } catch { failed(a); }
+      }
+    } catch (e) {
+      // usually rate limiting (Google answers with a redirect the browser blocks)
+      // (parallel batches failing together count as one strike)
+      if (Date.now() >= cooldownUntil) {
+        strikes++;
+        cooldownUntil = Date.now() + Math.min(300000, 15000 * 2 ** (strikes - 1));
+      }
+      console.warn("translation paused", Math.round((cooldownUntil - Date.now()) / 1000) + "s", e);
     }
-    return res;
   }
 
   async function runTranslations() {
     translating = true;
     try {
       for (;;) {
-        const todo = [...articles.values()].filter((a) => a.needsTranslation && a.titleEn === null && !a.tFailed);
-        if (!todo.length) break;
-        // cached first
-        for (const a of todo) if (tcache[a.title]) applyTranslation(a, tcache[a.title]);
-        const rest = todo.filter((a) => a.titleEn === null);
-        if (!rest.length) { scheduleRender(); continue; }
-        const batches = [];
-        let cur = [], len = 0;
-        for (const a of rest) {
-          const l = encodeURIComponent(a.title).length + 3;
-          if (cur.length && (len + l > 1800 || cur.length >= 12)) { batches.push(cur); cur = []; len = 0; }
-          cur.push(a); len += l;
+        const now = Date.now();
+        const waiting = [...articles.values()].filter(awaitingTranslation);
+        for (const a of waiting) if (tcache[a.title]) applyTranslation(a, tcache[a.title]);
+        const ready = waiting.filter((a) => !a.titleEn && (a.tRetryAt || 0) <= now);
+        const later = waiting.filter((a) => !a.titleEn && (a.tRetryAt || 0) > now);
+        if (!ready.length) {
+          if (later.length) retryTimer = setTimeout(queueTranslations, Math.min(...later.map((a) => a.tRetryAt)) - now + 50);
+          break;
         }
-        if (cur.length) batches.push(cur);
-        // a few batches in parallel
-        for (let i = 0; i < batches.length; i += 3) {
-          await Promise.all(batches.slice(i, i + 3).map(async (b) => {
-            const out = await translateBatch(b);
-            b.forEach((a, j) => {
-              if (out[j]) { tcache[a.title] = out[j]; applyTranslation(a, out[j]); }
-              else a.tFailed = true;
-            });
-          }));
-          updateStatus();
+        ready.sort((x, y) => priority(y) - priority(x));
+
+        if (now < cooldownUntil) {
+          // Google is refusing for now: do the most important few via the backup.
+          for (const a of ready.slice(0, 4)) {
+            try {
+              const en = await myMemory(a);
+              if (goodTranslation(a.title, en)) { tcache[a.title] = en; applyTranslation(a, en); } else failed(a);
+            } catch { failed(a); }
+            await sleep(1200);
+          }
           scheduleRender();
+          retryTimer = setTimeout(queueTranslations, Math.max(1000, cooldownUntil - Date.now()));
+          break;
         }
+
+        // next batches: up to 3 languages at once, most important first
+        const batches = [];
+        const used = new Set();
+        for (const lead of ready) {
+          const sl = langCode(lead.lang);
+          if (used.has(sl)) continue;
+          used.add(sl);
+          const batch = [];
+          let chars = 0;
+          for (const a of ready) {
+            if (langCode(a.lang) !== sl) continue;
+            if (batch.length && (batch.length >= 25 || chars + a.title.length > 3500)) break;
+            batch.push(a); chars += a.title.length + 1;
+          }
+          batches.push({ sl, batch });
+          if (batches.length === 3) break;
+        }
+        await Promise.all(batches.map(({ sl, batch }) => translateBatch(batch, sl)));
         saveCache();
+        updateStatus();
+        scheduleRender();
+        await sleep(400);
       }
     } finally { translating = false; }
   }
 
   function applyTranslation(a, en) {
-    a.titleEn = en;
+    a.titleEn = en.replace(/\s+/g, " ").trim();
     a.translated = true;
-    for (const c of detectCountries(en)) a.countries.add(c);
+    for (const c of detectCountries(a.titleEn)) a.countries.add(c);
     sourceStatus.translated++;
   }
 
@@ -392,7 +518,7 @@
     return w;
   }
   function tokens(text) {
-    return new Set((text || "").toLowerCase().replace(/[’']s\b/g, "").split(/[^a-z0-9À-ɏ]+/)
+    return new Set((text || "").toLowerCase().replace(/[’']s\b/g, "").split(/[^\p{L}\p{N}]+/u)
       .filter((w) => w.length > 2 && !STOP.has(w)).map(stem));
   }
   function similar(A, B) {
@@ -406,12 +532,11 @@
 
   function cluster() {
     const list = [...articles.values()]
-      .filter((a) => a.titleEn)
       .sort((a, b) => b.time - a.time);
     const groups = [];
     for (const a of list) {
-      a.tok = a.tok && a.tokFor === a.titleEn ? a.tok : tokens(a.titleEn);
-      a.tokFor = a.titleEn;
+      a.tok = a.tok && a.tokFor === shown(a) ? a.tok : tokens(shown(a));
+      a.tokFor = shown(a);
       if (!a.tok.size) continue;
       let g = null;
       for (const c of groups) {
@@ -445,8 +570,8 @@
       4 * Math.max(0, Math.min(langs, 4) - 1)));
 
     // headline shown: prefer a reputable English original
-    const display = outlets.find((a) => a.rep === "reputable" && !a.translated) ||
-      outlets.find((a) => !a.translated) || g.lead;
+    const display = outlets.find((a) => a.rep === "reputable" && !a.translated && a.titleEn) ||
+      outlets.find((a) => !a.translated && a.titleEn) || outlets.find((a) => a.titleEn) || g.lead;
     const newest = g.items.reduce((m, a) => (a.time > m ? a.time : m), g.items[0].time);
     const countries = new Set();
     const queried = new Set();
@@ -455,7 +580,7 @@
       for (const c of a.queried) queried.add(c);
     }
 
-    const text = display.titleEn.toLowerCase();
+    const text = shown(display).toLowerCase();
     let severity = 0;
     for (const [re, w] of SEVERITY_WORDS) if (re.test(text)) severity += w;
     severity = Math.min(severity, 14);
@@ -488,11 +613,17 @@
     if (s.status === "single" && s.stateOnly) h += ` <span class="badge state">State media</span>`;
     return h;
   }
+  function transNote(a) {
+    if (a.translated) return ` · <span title="Machine-translated from ${esc(a.lang)}">🌐 ${esc(a.lang)}</span>`;
+    if (!a.needsTranslation) return "";
+    if (a.tGaveUp) return ` · <span class="untranslated" title="Translation failed; showing the original">⚠ ${esc(a.lang)}, not translated</span>`;
+    return ` · <span class="untranslated">⏳ translating from ${esc(a.lang)}…</span>`;
+  }
   function storyLi(s, opts = {}) {
     const c = [...s.countries].slice(0, 3).map((n) => `<span class="tag">${esc(n)}</span>`).join("");
-    const tr = s.display.translated ? ` · <span title="Machine-translated from ${esc(s.display.lang)}">🌐 ${esc(s.display.lang)}</span>` : "";
+    const tr = transNote(s.display);
     return `<li data-id="${esc(s.id)}">
-      <div class="headline">${esc(s.display.titleEn)}</div>
+      <div class="headline"${s.display.titleEn ? "" : ' lang="' + esc(langCode(s.display.lang)) + '"'}>${esc(shown(s.display))}</div>
       <div class="meta">${badgeHtml(s)}<span>${s.outlets.length} source${s.outlets.length > 1 ? "s" : ""}</span>
         <span>· ${timeAgo(s.newest)}</span>${tr}${opts.countries === false ? "" : c}</div>
     </li>`;
@@ -503,6 +634,9 @@
       .filter((s) => s.status !== "single" || stories.length < 12)
       .sort((a, b) => b.score - a.score)
       .slice(0, 7);
+    // translate what's in the top list first
+    for (const a of articles.values()) a.inTop = false;
+    for (const s of top) for (const a of s.items) a.inTop = true;
     const tl = $("#top-list"), keep = tl.scrollTop;
     tl.innerHTML = top.length ? top.map((s) => storyLi(s)).join("")
       : `<li class="empty">${sourceStatus.gdelt === "error" && !sourceStatus.rss ? "Couldn't reach news sources. Check your connection and press ⟳." : "Gathering news from around the world…"}</li>`;
@@ -514,7 +648,7 @@
     if (feedFilter === "confirmed") list = list.filter((s) => s.status !== "single");
     if (feedSearch) {
       const q = feedSearch.toLowerCase();
-      list = list.filter((s) => s.items.some((a) => (a.titleEn || "").toLowerCase().includes(q) || a.domain.includes(q)));
+      list = list.filter((s) => s.items.some((a) => shown(a).toLowerCase().includes(q) || a.title.toLowerCase().includes(q) || a.domain.includes(q)));
     }
     // most important first, but keep fresh stuff near the top
     list = [...list].sort((a, b) => b.score - a.score).slice(0, 200);
@@ -533,11 +667,11 @@
     const langs = new Set([...articles.values()].map((a) => a.lang)).size;
     const outlets = new Set([...articles.values()].map((a) => a.domain)).size;
     const g = { pending: "…", loading: "loading", ok: "online", error: "offline" }[sourceStatus.gdelt];
-    const pending = [...articles.values()].filter((a) => a.needsTranslation && a.titleEn === null && !a.tFailed).length;
+    const pending = [...articles.values()].filter(awaitingTranslation).length;
     $("#status-text").textContent =
       `${articles.size} articles · ${outlets} outlets · ${langs} languages · ${stories.length} stories` +
       ` · GDELT ${g} · RSS ${sourceStatus.rss}/${sourceStatus.rssTotal}` +
-      (pending ? ` · translating ${pending}…` : "") +
+      (pending ? ` · translating ${pending}${Date.now() < cooldownUntil ? " (paused, retrying soon)" : "…"}` : "") +
       (lastUpdate ? ` · updated ${lastUpdate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "");
   }
 
@@ -678,7 +812,7 @@
     w.className = "news-window";
     w.dataset.id = s.id;
     w.innerHTML = windowHtml(s);
-    w.dataset.sig = s.outlets.length + "|" + s.status + "|" + s.display.titleEn;
+    w.dataset.sig = s.outlets.length + "|" + s.status + "|" + shown(s.display);
     $("#windows").appendChild(w);
     const width = Math.min(420, innerWidth - 20);
     const x = Math.max(10, Math.min(innerWidth - width - 10, innerWidth / 2 - width / 2 + (cascade % 6) * 28 - 70));
@@ -700,7 +834,7 @@
     const color = { verified: "var(--verified)", corroborated: "var(--corroborated)", single: "var(--single)" }[s.status];
     const srcs = s.outlets.slice(0, 40).map((o) => `<li>
         <span class="tag">${esc(o.domain)}</span>
-        <a href="${esc(safeUrl(o.url))}" target="_blank" rel="noopener noreferrer" title="${esc(o.title)}">${esc(o.titleEn || o.title)}</a>
+        <a href="${esc(safeUrl(o.url))}" target="_blank" rel="noopener noreferrer" title="${esc(o.title)}">${esc(shown(o))}</a>
         ${o.rep === "reputable" ? "✓" : o.rep === "state" ? "<span title='State-affiliated media'>⚑</span>" : ""}
       </li>`).join("");
     const explain = {
@@ -716,8 +850,9 @@
       </div>
       <div class="win-body">
         ${s.image ? `<img class="hero" src="${esc(safeUrl(s.image))}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}
-        <h3>${esc(a.titleEn)}</h3>
-        ${a.translated ? `<div class="orig">Translated from ${esc(a.lang)}: “${esc(a.title)}”</div>` : ""}
+        <h3>${esc(shown(a))}</h3>
+        ${a.translated ? `<div class="orig">Machine-translated from ${esc(a.lang)}. Original: “${esc(a.title)}”</div>`
+          : a.needsTranslation ? `<div class="orig">${a.tGaveUp ? "Couldn't translate this" : "Translating"} from ${esc(a.lang)}${a.tGaveUp ? "; showing the original." : "…"}</div>` : ""}
         <div class="meta">${badgeHtml(s)}
           <span>${esc(a.time.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))}</span>
           <span>· ${esc(a.via === "GDELT" ? (a.srcCountry || "worldwide index") : a.via)}</span>
@@ -742,7 +877,7 @@
       if (!s) continue;
       const body = w.querySelector(".win-body");
       const scroll = body ? body.scrollTop : 0;
-      const sig = s.outlets.length + "|" + s.status + "|" + s.display.titleEn;
+      const sig = s.outlets.length + "|" + s.status + "|" + shown(s.display);
       if (w.dataset.sig === sig) continue;
       w.dataset.sig = sig;
       w.innerHTML = windowHtml(s);
