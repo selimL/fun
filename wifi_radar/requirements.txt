@@ -1,0 +1,4 @@
+numpy>=1.24
+pygame>=2.5
+# optional, only for the Linux monitor-mode backend (finds phones/laptops, faster readings):
+# scapy>=2.5
