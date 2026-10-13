@@ -1,8 +1,9 @@
-# Tech Breakthrough Radar
+# Tech & Science Radar
 
-A spinning 3D globe showing the latest technology and science breakthroughs from around the world:
+A spinning 3D globe showing interesting technology and science news from around the world:
 AI, robotics, aerospace & aerodynamics, space, software & coding, engineering, physics, quantum,
-energy, chips & hardware, biotech & medicine, and materials.
+energy, chips & hardware, biotech & medicine, materials, gadgets, EVs & transport, internet & security,
+climate & earth, startups & industry, and general science.
 
 Open `index.html` through any static web server (GitHub Pages, or `python3 -m http.server` in this folder).
 There's no build step.
@@ -32,9 +33,10 @@ There's no build step.
 
   This is an automated check, not a human fact-check.
 - **Mixes countries**: the top list and feed are re-ranked so one country can't fill them.
-- **Ranks** stories by corroboration, source quality, breakthrough signals ("world's first", "record",
-  "discovered", …) and recency. Stock-price, shopping and rumour stories are pushed down or dropped.
-- **Globe**: countries glow by how much is happening there. Labs and companies are mapped to their country
+- **Ranks** stories by corroboration, source quality, how notable they look ("world's first", "record",
+  "discovered", …) and recency. Shopping deals and listicles are dropped.
+- **Globe**: countries are coloured from blue (a few stories) through green and amber to red (the most), ranked
+  so smaller countries still show up. Labs and companies are mapped to their country
   (DeepMind → UK, TSMC → Taiwan, CERN → Switzerland, …). Click a country to search for its news.
 - **Popups**: click any headline for a window you can drag around, with all sources and a link to the article.
 - Clock and date in the top right. Auto-refreshes every 10 minutes (⟳ to refresh now). `Esc` closes the top popup.

@@ -176,3 +176,48 @@ a { color: var(--accent); }
 .badge.institution { color: #b39dff; }
 .badge.preprint { color: #ff9f43; }
 .badge.press { color: #95a5a6; }
+
+/* ---------- dark, low-glare theme ---------- */
+:root {
+  --bg: #07090c;
+  --panel: rgba(13, 16, 21, 0.9);
+  --panel-border: rgba(255, 255, 255, 0.07);
+  --text: #c5ccd4;
+  --muted: #6c7682;
+  --accent: #8ea3b8;
+  --red: #b35a52;
+  --verified: #5f9e78;
+  --corroborated: #b59a4e;
+  --single: #6c7682;
+  --state: #b07a4f;
+}
+.panel { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(179,90,82,.5); } 50% { box-shadow: 0 0 0 5px rgba(179,90,82,0); } }
+#top-list li::before { color: var(--muted); }
+#top-list li:first-child::before { color: var(--red); }
+.news-list li:hover { background: rgba(255, 255, 255, 0.035); }
+.news-list .headline { color: #d5dbe1; }
+.chip.active { background: rgba(142, 163, 184, 0.12); border-color: rgba(142, 163, 184, 0.5); }
+#feed-search:focus { border-color: rgba(142, 163, 184, 0.5); }
+.icon-btn:hover { border-color: rgba(142, 163, 184, 0.5); }
+.badge { border-color: color-mix(in srgb, currentColor 55%, transparent); font-weight: 600; }
+.badge.journal { color: #6f97b8; }
+.badge.institution { color: #9a8fbf; }
+.badge.preprint { color: #b98a5a; }
+.badge.press { color: #7c8590; }
+.tag { background: rgba(255, 255, 255, 0.05); color: #9aa4ae; }
+a { color: #8fb0cc; }
+.news-window { background: #0f1318; border-color: rgba(255, 255, 255, 0.1); box-shadow: 0 16px 50px rgba(0, 0, 0, 0.7); }
+.news-window .win-bar { background: rgba(255, 255, 255, 0.03); border-bottom-color: rgba(255, 255, 255, 0.07); }
+.news-window h3 { color: #dde2e7; }
+.news-window .desc { color: #a8b1ba; }
+.news-window .open-btn { background: #26303b; color: #d5dde5; border: 1px solid rgba(255, 255, 255, 0.1); }
+.news-window .open-btn:hover { background: #2f3b48; }
+.globe-tip { background: rgba(13, 16, 21, 0.95); }
+.untranslated { color: #a8875e; }
+.legend { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend-bar {
+  display: inline-block; width: 70px; height: 7px; border-radius: 4px;
+  background: linear-gradient(90deg, #4e7aa8, #429286, #7ca05a, #c0a250, #c6764a, #b64e46);
+}
+@media (max-width: 900px) { .legend { display: none; } }

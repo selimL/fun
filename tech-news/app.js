@@ -1,4 +1,4 @@
-/* Tech Breakthrough Radar
+/* Tech & Science Radar
  *
  * Pipeline:
  *   1. Collect   – GDELT worldwide news index (100+ languages, every country)
@@ -10,8 +10,8 @@
  *                  many independent outlets report it and what kind of source
  *                  (peer-reviewed journal, lab, preprint, press release).
  *   5. Rank      – stories are scored by corroboration, source quality,
- *                  "breakthrough" signals and recency.
- *   6. Show      – globe heat map, top breakthroughs, per-country feed, popups.
+ *                  how notable the headline looks, and recency.
+ *   6. Show      – globe heat map, top stories, per-country feed, popups.
  */
 (() => {
   "use strict";
@@ -21,17 +21,19 @@
   const GDELT_GAP_MS = 5500;            // GDELT allows one request every 5 s
   const REFRESH_MS = 10 * 60 * 1000;    // auto refresh every 10 minutes
   // GDELT matches these against article text in every language
+  // Broad on purpose: anything interesting in tech & science. Off-topic hits
+  // are dropped later by the field classifier.
   const TECH_QUERIES = [
-    "(breakthrough OR \"artificial intelligence\" OR robotics OR humanoid OR \"machine learning\" OR quantum OR physicists OR aerodynamics OR aerospace OR semiconductor)",
-    "(scientists OR researchers OR \"new material\" OR fusion OR battery OR spacecraft OR \"neural network\" OR programming OR engineers OR supercomputer)",
+    "(technology OR \"artificial intelligence\" OR robot OR robotics OR software OR startup OR innovation OR engineering OR aerospace OR semiconductor OR cybersecurity)",
+    "(science OR scientists OR researchers OR physics OR quantum OR spacecraft OR satellite OR battery OR \"electric vehicle\" OR smartphone OR telescope)",
   ];
   // The same search limited to news written in other languages, so coverage
   // isn't dominated by English-language (mostly US) outlets.
   const REGION_QUERY =
-    "(breakthrough OR \"artificial intelligence\" OR robot OR quantum OR scientists OR researchers OR engineers OR semiconductor OR spacecraft OR physics)";
+    "(technology OR science OR \"artificial intelligence\" OR robot OR researchers OR scientists OR engineers OR semiconductor OR satellite OR startup OR smartphone)";
   const REGION_LANGS = ["chinese", "japanese", "korean", "german", "french", "spanish", "italian"];
   const COUNTRY_QUERY =
-    "(breakthrough OR scientists OR researchers OR engineers OR \"artificial intelligence\" OR robot OR quantum OR technology OR physics OR aerospace)";
+    "(technology OR science OR scientists OR researchers OR engineers OR \"artificial intelligence\" OR robot OR startup OR space OR innovation)";
   const TOPIC_BY_ID = new Map(TOPICS.map((t) => [t.id, t]));
 
   const STOP = new Set(("the a an and or of to in on for at by with from as is are was were be been has have had " +
@@ -745,7 +747,7 @@
     for (const a of articles.values()) a.inTop = false;
     for (const s of top) for (const a of s.items) a.inTop = true;
     const t = TOPIC_BY_ID.get(topicFilter);
-    $("#top-title").textContent = t ? `Top in ${t.name}` : "Top Breakthroughs";
+    $("#top-title").textContent = t ? `Top in ${t.name}` : "Top Stories";
     const tl = $("#top-list"), keep = tl.scrollTop;
     tl.innerHTML = top.length ? top.map((s) => storyLi(s)).join("")
       : `<li class="empty">${sourceStatus.gdelt === "error" && !sourceStatus.rss ? "Couldn't reach news sources. Check your connection and press ⟳." : "Scanning labs, journals and newsrooms worldwide…"}</li>`;
@@ -797,14 +799,24 @@
   let counts = new Map();
   let maxCount = 1;
 
+  // Muted palette from few stories (slate blue) to many (brick red). Countries
+  // are coloured by their rank, so one busy country doesn't wash out the rest.
+  const HEAT_STOPS = [[78, 122, 168], [66, 146, 134], [124, 160, 90], [192, 162, 80], [198, 118, 74], [182, 78, 70]];
+  let heatRank = new Map();
+  function heatColor(t, alpha) {
+    const x = Math.max(0, Math.min(1, t)) * (HEAT_STOPS.length - 1);
+    const i = Math.min(HEAT_STOPS.length - 2, Math.floor(x)), f = x - i;
+    const [r, g, b] = HEAT_STOPS[i].map((v, k) => Math.round(v + (HEAT_STOPS[i + 1][k] - v) * f));
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
   function heat(f) {
     const name = f.properties.name;
-    if (name === selectedCountry) return "rgba(79,195,255,0.75)";
-    if (name === hoverCountry) return "rgba(255,255,255,0.35)";
+    if (name === selectedCountry) return "rgba(190,205,222,0.6)";
+    if (name === hoverCountry) return "rgba(255,255,255,0.22)";
     const c = counts.get(name) || 0;
-    if (!c) return "rgba(60,90,120,0.12)";
-    const t = Math.min(1, Math.log(1 + c) / Math.log(1 + maxCount));
-    return `rgba(255,${Math.round(170 - 140 * t)},${Math.round(60 - 40 * t)},${(0.25 + 0.55 * t).toFixed(2)})`;
+    if (!c) return "rgba(255,255,255,0.025)";
+    const t = heatRank.get(c) ?? 0;
+    return heatColor(t, (0.65 + 0.2 * t).toFixed(2));
   }
 
   function centerOf(f) {
@@ -823,15 +835,15 @@
   function initGlobe() {
     const el = $("#globe");
     globe = Globe()(el)
-      .globeImageUrl("vendor/earth-night.jpg")
+      .globeImageUrl("vendor/earth-dark.jpg")
       .backgroundImageUrl("vendor/night-sky.png")
       .showAtmosphere(true)
-      .atmosphereColor("#4fc3ff")
-      .atmosphereAltitude(0.18)
+      .atmosphereColor("#3d5266")
+      .atmosphereAltitude(0.12)
       .polygonsData(countryFeatures)
       .polygonCapColor(heat)
-      .polygonSideColor(() => "rgba(20,40,60,0.35)")
-      .polygonStrokeColor(() => "rgba(140,200,255,0.35)")
+      .polygonSideColor(() => "rgba(10,14,20,0.5)")
+      .polygonStrokeColor(() => "rgba(255,255,255,0.12)")
       .polygonAltitude(altFor)
       .polygonsTransitionDuration(250)
       .polygonLabel((f) => {
@@ -846,7 +858,7 @@
       })
       .onPolygonClick((f) => selectCountry(f.properties.name))
       .ringsData([])
-      .ringColor(() => (t) => `rgba(255,77,77,${1 - t})`)
+      .ringColor(() => (t) => `rgba(190,120,90,${0.7 * (1 - t)})`)
       .ringMaxRadius((d) => d.r)
       .ringPropagationSpeed(2)
       .ringRepeatPeriod(1400);
@@ -878,6 +890,8 @@
     if (!globe) return;
     counts = countryCounts();
     maxCount = Math.max(1, ...counts.values());
+    const levels = [...new Set(counts.values())].sort((a, b) => a - b);
+    heatRank = new Map(levels.map((v, i) => [v, levels.length > 1 ? i / (levels.length - 1) : 1]));
     globe.polygonCapColor(heat);
     // pulsing rings on the hottest countries
     const hot = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)

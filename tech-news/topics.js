@@ -1,4 +1,4 @@
-// Topic configuration for Tech Breakthrough Radar.
+// Topic configuration for Tech & Science Radar.
 
 // Fields shown as filter chips. `re` is matched against the English headline
 // (and the feed's description, when there is one).
@@ -27,9 +27,21 @@ window.TOPICS = [
     re: /\b(biotech\w*|gene (editing|therapy)|crispr|genom(e|ic|ics)|dna|rna|mrna|proteins?|protein folding|vaccines?|cancer|clinical trials?|brain[- ]computer interfaces?|neuralink|implants?|prosthe(tic|sis|ses)|stem cells?|drug discovery|medical devices?)\b/i },
   { id: "materials", name: "Materials", icon: "🧪", color: "#c084fc",
     re: /\b(materials? science|new materials?|graphene|nanotub\w*|nanomaterials?|metamaterials?|alloys?|ceramics?|polymers?|composites?|crystals?|2d materials?|aerogels?|self-healing)\b/i },
+  { id: "gadgets", name: "Gadgets & Devices", icon: "📱", color: "#94a3b8",
+    re: /\b(smartphones?|iphones?|android|pixel|galaxy s\d+|laptops?|tablets?|ipad|wearables?|smartwatch\w*|headsets?|vr|virtual reality|augmented reality|mixed reality|vision pro|consoles?|playstation|xbox|nintendo|gadgets?|foldables?|earbuds|cameras?|displays?|oled)\b/i },
+  { id: "transport", name: "EVs & Transport", icon: "🚗", color: "#94a3b8",
+    re: /\b(electric (vehicles?|cars?|trucks?|buses?|planes?)|evs?|charging|tesla|byd|rivian|lidar|high-speed (rail|trains?)|maglev|railways?|hyperloop|ships?|shipping|ev batter\w*)\b/i },
+  { id: "internet", name: "Internet & Security", icon: "🔐", color: "#94a3b8",
+    re: /\b(internet|5g|6g|broadband|starlink|social media|cyber ?attacks?|hack(s|ed|ers?)?|ransomware|malware|data breach|privacy|browsers?|search engines?|apps?|streaming|undersea cables?)\b/i },
+  { id: "climate", name: "Climate & Earth", icon: "🌍", color: "#94a3b8",
+    re: /\b(climate|carbon capture|emissions?|global warming|weather|hurricanes?|earthquakes?|volcan\w*|oceans?|glaciers?|ice sheets?|wildfires?|biodiversity|environment(al)?|pollution|recycling|geolog\w*|seismic)\b/i },
+  { id: "startups", name: "Startups & Industry", icon: "🏭", color: "#94a3b8",
+    re: /\b(startups?|unicorns?|acquisitions?|acquires?|mergers?|funding|venture capital|ipo|factory|factories|gigafactory|tech giants?|big tech|antitrust|regulat(ion|ors?|es)|export controls?)\b/i },
+  { id: "science", name: "Science", icon: "🔬", color: "#94a3b8",
+    re: /\b(science|scientists?|scientific|researchers?|study|studies|experiment(s|al)?|laborator(y|ies)|lab|discover(y|ies|ed|s)?|evolution|fossils?|dinosaurs?|archaeolog\w*|chemistry|chemists?|biolog\w*|mathematic\w*|mathematicians?|neuroscience|brain)\b/i },
 ];
 
-// Words that make a headline look like a genuine breakthrough (raise its rank)
+// Words that make a headline look notable (raise its rank)
 // or like routine business / hype (lower it).
 window.BREAKTHROUGH_WORDS = [
   [/\bbreakthrough\b/, 6], [/\bworld'?s first|first[- ]ever|for the first time\b/, 6], [/\brecord[- ](breaking|setting)?|new record|world record\b/, 4],
@@ -38,9 +50,9 @@ window.BREAKTHROUGH_WORDS = [
   [/\boutperform(s|ed)?|surpass(es|ed)?\b/, 3], [/\bpublished in|peer[- ]reviewed|study (finds|shows)\b/, 3],
   [/\bprototype|first flight|maiden flight|test flight\b/, 3], [/\bscientists|researchers|physicists|engineers\b/, 2],
   [/\bunprecedented|revolutionary|game[- ]chang\w*\b/, 2], [/\blaunch(es|ed)?\b/, 1],
-  [/\bshares?|stocks?|earnings|revenue|investors?|ipo|valuation|funding round|raises \$|price\b/, -3],
+  [/\bshares?|stocks?|earnings|revenue|valuation\b/, -1],
   [/\bdeals?|discount|% off|sale|coupon|best .* (to buy|of 20\d\d)|review:|hands-on\b/, -6],
-  [/\blawsuit|sues|court|layoffs?|rumou?rs?|leak(s|ed)?\b/, -3],
+  [/\brumou?rs?|leak(s|ed)?\b/, -1],
 ];
 // Headlines with these are dropped from GDELT results (shopping / listicles).
 window.NOISE_RE = /\b(deals? (on|of)|black friday|cyber monday|% off|coupon|promo code|best .* to buy|horoscope|lottery)\b/i;

@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tech Breakthrough Radar</title>
+  <title>Tech &amp; Science Radar</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="globe"></div>
 
-  <!-- Top left: most important breakthroughs -->
+  <!-- Top left: most important stories -->
   <section id="top-stories" class="panel">
     <header class="panel-head">
-      <h2><span class="dot live"></span><span id="top-title">Top Breakthroughs</span></h2>
+      <h2><span class="dot live"></span><span id="top-title">Top Stories</span></h2>
       <button id="toggle-top" class="icon-btn" title="Collapse">–</button>
     </header>
     <ol id="top-list" class="news-list"></ol>
@@ -45,6 +45,7 @@
 
   <!-- Bottom left: source status -->
   <footer id="status" class="panel">
+    <span class="legend" title="Countries are coloured by how many stories mention them">Stories <i class="legend-bar"></i> more</span>
     <span id="status-text">Starting…</span>
     <button id="refresh" class="icon-btn" title="Refresh now">⟳</button>
   </footer>
