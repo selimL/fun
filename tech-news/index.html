@@ -25,9 +25,6 @@
     <div id="clock-utc">&nbsp;</div>
   </section>
 
-  <!-- Top centre: field filter -->
-  <nav id="topics" class="panel" aria-label="Fields"></nav>
-
   <!-- Right: feed for the world or a selected country -->
   <section id="feed" class="panel">
     <header class="panel-head">
@@ -36,6 +33,7 @@
     </header>
     <div class="feed-tools">
       <input id="feed-search" type="search" placeholder="Filter headlines…" autocomplete="off" />
+      <div id="topics" class="topic-row" aria-label="Fields"></div>
       <div class="chips" role="tablist">
         <button class="chip active" data-filter="all">All</button>
         <button class="chip" data-filter="confirmed">Verified + corroborated</button>

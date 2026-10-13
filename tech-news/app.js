@@ -25,6 +25,11 @@
     "(breakthrough OR \"artificial intelligence\" OR robotics OR humanoid OR \"machine learning\" OR quantum OR physicists OR aerodynamics OR aerospace OR semiconductor)",
     "(scientists OR researchers OR \"new material\" OR fusion OR battery OR spacecraft OR \"neural network\" OR programming OR engineers OR supercomputer)",
   ];
+  // The same search limited to news written in other languages, so coverage
+  // isn't dominated by English-language (mostly US) outlets.
+  const REGION_QUERY =
+    "(breakthrough OR \"artificial intelligence\" OR robot OR quantum OR scientists OR researchers OR engineers OR semiconductor OR spacecraft OR physics)";
+  const REGION_LANGS = ["chinese", "japanese", "korean", "german", "french", "spanish", "italian"];
   const COUNTRY_QUERY =
     "(breakthrough OR scientists OR researchers OR engineers OR \"artificial intelligence\" OR robot OR quantum OR technology OR physics OR aerospace)";
   const TOPIC_BY_ID = new Map(TOPICS.map((t) => [t.id, t]));
@@ -256,9 +261,16 @@
     sourceStatus.gdelt = "loading";
     updateStatus();
     let ok = 0;
-    for (const query of TECH_QUERIES) {
+    // interleave so non-US news shows up early
+    const searches = [
+      { query: TECH_QUERIES[0], maxrecords: "250" },
+      ...REGION_LANGS.slice(0, 3).map((l) => ({ query: `${REGION_QUERY} sourcelang:${l}`, maxrecords: "100" })),
+      { query: TECH_QUERIES[1], maxrecords: "250" },
+      ...REGION_LANGS.slice(3).map((l) => ({ query: `${REGION_QUERY} sourcelang:${l}`, maxrecords: "75" })),
+    ];
+    for (const { query, maxrecords } of searches) {
       try {
-        const list = await gdelt({ query, maxrecords: "250", timespan: "48h", sort: "hybridrel" });
+        const list = await gdelt({ query, maxrecords, timespan: "48h", sort: "hybridrel" });
         ingestGdelt(list);
         ok++;
         queueTranslations();
@@ -318,11 +330,13 @@
     let n = 0;
     for (const i of items.slice(0, feed.limit || items.length)) {
       const desc = stripHtml(i.desc).replace(/^arXiv:\S+\s+Announce Type:\s*\S+\s*Abstract:\s*/i, "").slice(0, 400);
-      if (!feed.all && !detectTopics(i.title + " " + desc).size) continue;
+      const english = !feed.lang || feed.lang === "English";
+      // non-English feeds are checked for topics after translation
+      if (!feed.all && english && !detectTopics(i.title + " " + desc).size) continue;
       if (isNaN(i.date)) i.date = new Date();
       if (Date.now() - i.date > 7 * 86400000) continue;
       const a = addArticle({
-        url: i.link, title: stripHtml(i.title), lang: "English", srcCountry: "",
+        url: i.link, title: stripHtml(i.title), lang: feed.lang || "English", srcCountry: feed.country || "",
         time: i.date, image: i.image, desc, via: feed.name, kind: feed.kind, forcedTopic: feed.topic,
       });
       if (a) {
@@ -342,11 +356,15 @@
 
   async function loadRss() {
     sourceStatus.rss = 0;
-    await Promise.all(RSS_FEEDS.map(async (f) => {
-      try { await loadFeed(f); sourceStatus.rss++; scheduleRender(); }
-      catch (e) { console.warn("RSS failed", f.name, e); }
-      updateStatus();
-    }));
+    const queue = [...RSS_FEEDS];
+    const worker = async () => {
+      for (let f; (f = queue.shift());) {
+        try { await loadFeed(f); sourceStatus.rss++; queueTranslations(); scheduleRender(); }
+        catch (e) { console.warn("RSS failed", f.name, e); }
+        updateStatus();
+      }
+    };
+    await Promise.all(Array.from({ length: 6 }, worker));
   }
 
   // ------------------------------------------------------------ translation
@@ -677,10 +695,31 @@
   function topicTags(s, max = 3) {
     return [...s.topics].slice(0, max).map((id) => {
       const t = TOPIC_BY_ID.get(id);
-      return `<span class="tag topic" style="--c:${t.color}">${t.icon} ${esc(t.name)}</span>`;
+      return `<span class="tag">${t.icon} ${esc(t.name)}</span>`;
     }).join("");
   }
   const matchesTopic = (s) => topicFilter === "all" || s.topics.has(topicFilter);
+
+  // Re-rank so the list mixes countries: each further story from a country
+  // that's already listed loses a few points.
+  function diversify(list, limit) {
+    const pool = [...list];
+    const seen = new Map();
+    const out = [];
+    while (pool.length && out.length < limit) {
+      let best = 0, bestScore = -Infinity;
+      pool.forEach((s, i) => {
+        let rep = 0;
+        for (const c of s.countries) rep = Math.max(rep, seen.get(c) || 0);
+        const v = s.score - 6 * rep;
+        if (v > bestScore) { bestScore = v; best = i; }
+      });
+      const [s] = pool.splice(best, 1);
+      out.push(s);
+      for (const c of s.countries) seen.set(c, (seen.get(c) || 0) + 1);
+    }
+    return out;
+  }
   function transNote(a) {
     if (a.translated) return ` · <span title="Machine-translated from ${esc(a.lang)}">🌐 ${esc(a.lang)}</span>`;
     if (!a.needsTranslation) return "";
@@ -700,10 +739,8 @@
 
   function renderTop() {
     const pool = stories.filter(matchesTopic);
-    const top = [...pool]
-      .filter((s) => s.status !== "single" || s.proof === "journal" || s.proof === "institution" || pool.length < 25)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 7);
+    const top = diversify(pool
+      .filter((s) => s.status !== "single" || s.proof === "journal" || s.proof === "institution" || pool.length < 25), 7);
     // translate what's in the top list first
     for (const a of articles.values()) a.inTop = false;
     for (const s of top) for (const a of s.items) a.inTop = true;
@@ -724,7 +761,7 @@
       list = list.filter((s) => s.items.some((a) => shown(a).toLowerCase().includes(q) || a.title.toLowerCase().includes(q) || a.domain.includes(q)));
     }
     // most important first, but keep fresh stuff near the top
-    list = [...list].sort((a, b) => b.score - a.score).slice(0, 200);
+    list = selectedCountry ? [...list].sort((a, b) => b.score - a.score).slice(0, 200) : diversify(list, 200);
     $("#feed-title").textContent = selectedCountry ? selectedCountry : "Global Feed";
     $("#feed-clear").hidden = !selectedCountry;
     const fl = $("#feed-list"), keep = fl.scrollTop;
@@ -762,13 +799,12 @@
 
   function heat(f) {
     const name = f.properties.name;
-    if (name === selectedCountry) return "rgba(250,250,255,0.8)";
+    if (name === selectedCountry) return "rgba(79,195,255,0.75)";
     if (name === hoverCountry) return "rgba(255,255,255,0.35)";
     const c = counts.get(name) || 0;
-    if (!c) return "rgba(90,80,150,0.12)";
-    // cool cyan for a little activity -> hot magenta for a lot
+    if (!c) return "rgba(60,90,120,0.12)";
     const t = Math.min(1, Math.log(1 + c) / Math.log(1 + maxCount));
-    return `rgba(${Math.round(40 + 200 * t)},${Math.round(220 - 150 * t)},${Math.round(255 - 15 * t)},${(0.25 + 0.55 * t).toFixed(2)})`;
+    return `rgba(255,${Math.round(170 - 140 * t)},${Math.round(60 - 40 * t)},${(0.25 + 0.55 * t).toFixed(2)})`;
   }
 
   function centerOf(f) {
@@ -790,12 +826,12 @@
       .globeImageUrl("vendor/earth-night.jpg")
       .backgroundImageUrl("vendor/night-sky.png")
       .showAtmosphere(true)
-      .atmosphereColor("#9d7bff")
+      .atmosphereColor("#4fc3ff")
       .atmosphereAltitude(0.18)
       .polygonsData(countryFeatures)
       .polygonCapColor(heat)
       .polygonSideColor(() => "rgba(20,40,60,0.35)")
-      .polygonStrokeColor(() => "rgba(180,160,255,0.35)")
+      .polygonStrokeColor(() => "rgba(140,200,255,0.35)")
       .polygonAltitude(altFor)
       .polygonsTransitionDuration(250)
       .polygonLabel((f) => {
@@ -810,7 +846,7 @@
       })
       .onPolygonClick((f) => selectCountry(f.properties.name))
       .ringsData([])
-      .ringColor(() => (t) => `rgba(232,121,249,${1 - t})`)
+      .ringColor(() => (t) => `rgba(255,77,77,${1 - t})`)
       .ringMaxRadius((d) => d.r)
       .ringPropagationSpeed(2)
       .ringRepeatPeriod(1400);
@@ -893,7 +929,7 @@
     $("#windows").appendChild(w);
     const width = Math.min(420, innerWidth - 20);
     const x = Math.max(10, Math.min(innerWidth - width - 10, innerWidth / 2 - width / 2 + (cascade % 6) * 28 - 70));
-    const y = Math.max(10, Math.min(innerHeight - 200, 140 + (cascade % 6) * 28));
+    const y = Math.max(10, Math.min(innerHeight - 200, 90 + (cascade % 6) * 28));
     cascade++;
     w.style.left = x + "px";
     w.style.top = y + "px";
@@ -1033,13 +1069,13 @@
       renderFeed();
     }));
     const tb = $("#topics");
-    tb.innerHTML = `<button class="topic-chip active" data-topic="all">🌐 All fields</button>` +
-      TOPICS.map((t) => `<button class="topic-chip" data-topic="${t.id}" style="--c:${t.color}">${t.icon} ${esc(t.name)}</button>`).join("");
+    tb.innerHTML = `<button class="chip active" data-topic="all">All fields</button>` +
+      TOPICS.map((t) => `<button class="chip" data-topic="${t.id}">${t.icon} ${esc(t.name)}</button>`).join("");
     tb.addEventListener("click", (e) => {
-      const b = e.target.closest(".topic-chip");
+      const b = e.target.closest(".chip");
       if (!b) return;
       topicFilter = b.dataset.topic;
-      tb.querySelectorAll(".topic-chip").forEach((x) => x.classList.toggle("active", x === b));
+      tb.querySelectorAll(".chip").forEach((x) => x.classList.toggle("active", x === b));
       renderTop(); renderFeed(); renderGlobe();
     });
     let st;

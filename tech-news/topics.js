@@ -127,6 +127,8 @@ window.ORG_COUNTRY = {
 //   topic: force this topic on every item
 //   limit: keep at most this many items (busy feeds)
 //   kind:  journal / preprint / press / institution source type override
+//   lang:  language of the feed (default English); headlines get translated
+//   country: where the outlet is based
 window.RSS_FEEDS = [
   { name: "MIT Technology Review", url: "https://www.technologyreview.com/feed/", all: true },
   { name: "IEEE Spectrum", url: "https://spectrum.ieee.org/feeds/feed.rss", all: true },
@@ -159,6 +161,47 @@ window.RSS_FEEDS = [
   { name: "arXiv Fluid Dynamics", url: "https://rss.arxiv.org/rss/physics.flu-dyn", all: true, topic: "aero", limit: 6, kind: "preprint" },
   { name: "arXiv Quantum", url: "https://rss.arxiv.org/rss/quant-ph", all: true, topic: "quantum", limit: 6, kind: "preprint" },
   { name: "arXiv Software Eng.", url: "https://rss.arxiv.org/rss/cs.SE", all: true, topic: "coding", limit: 6, kind: "preprint" },
+
+  // ---- regional sources. `country` = where the outlet is based (used when a
+  // headline doesn't name a country); `lang` = language, translated to English.
+  // China
+  { name: "SCMP Tech", url: "https://www.scmp.com/rss/36/feed", country: "China" },
+  { name: "TechNode", url: "https://technode.com/feed/", country: "China" },
+  { name: "Pandaily", url: "https://pandaily.com/feed/", country: "China" },
+  { name: "CGTN Sci-Tech", url: "https://www.cgtn.com/subscribe/rss/section/tech.xml", all: true, country: "China" },
+  { name: "36Kr", url: "https://36kr.com/feed", lang: "Chinese", country: "China", limit: 30 },
+  { name: "IT之家", url: "https://www.ithome.com/rss/", lang: "Chinese", country: "China", limit: 30 },
+  { name: "科学网", url: "https://www.sciencenet.cn/xml/news.aspx", lang: "Chinese", country: "China", all: true, limit: 25 },
+  // Japan
+  { name: "Japan Times", url: "https://www.japantimes.co.jp/feed/", country: "Japan" },
+  { name: "Nikkei Asia", url: "https://asia.nikkei.com/rss/feed/nar", country: "Japan" },
+  { name: "ITmedia", url: "https://rss.itmedia.co.jp/rss/2.0/itmedia_all.xml", lang: "Japanese", country: "Japan", limit: 30 },
+  { name: "PC Watch", url: "https://pc.watch.impress.co.jp/data/rss/1.0/pcw/feed.rdf", lang: "Japanese", country: "Japan", limit: 25 },
+  { name: "sorae (space)", url: "https://sorae.info/feed", lang: "Japanese", country: "Japan", all: true, topic: "space", limit: 15 },
+  // South Korea
+  { name: "Yonhap", url: "https://en.yna.co.kr/RSS/news.xml", country: "South Korea" },
+  { name: "Korea Herald", url: "https://www.koreaherald.com/rss/newsAll", country: "South Korea" },
+  { name: "Korea Bizwire", url: "https://koreabizwire.com/feed", country: "South Korea", kind: "press" },
+  { name: "ZDNet Korea", url: "https://feeds.feedburner.com/zdkorea", lang: "Korean", country: "South Korea", limit: 30 },
+  { name: "전자신문", url: "https://rss.etnews.com/Section901.xml", lang: "Korean", country: "South Korea", limit: 30 },
+  // Taiwan / India
+  { name: "Focus Taiwan", url: "https://focustaiwan.tw/rss/sci-tech", country: "Taiwan", all: true },
+  { name: "The Hindu Sci-Tech", url: "https://www.thehindu.com/sci-tech/feeder/default.rss", country: "India", all: true },
+  // Europe
+  { name: "Euronews Next", url: "https://www.euronews.com/rss?level=vertical&name=next", all: true },
+  { name: "DW Science", url: "https://rss.dw.com/xml/rss_en_science", all: true, country: "Germany" },
+  { name: "CERN", url: "https://home.cern/api/news/news/feed.rss", all: true, topic: "physics", country: "Switzerland", kind: "institution" },
+  { name: "Sifted", url: "https://sifted.eu/feed" },
+  { name: "The Next Web", url: "https://thenextweb.com/feed" },
+  { name: "The Register", url: "https://www.theregister.com/headlines.atom", country: "United Kingdom" },
+  { name: "heise online", url: "https://www.heise.de/rss/heise-atom.xml", lang: "German", country: "Germany", limit: 30 },
+  { name: "golem.de", url: "https://rss.golem.de/rss.php?feed=RSS2.0", lang: "German", country: "Germany", limit: 25 },
+  { name: "Spektrum", url: "https://www.spektrum.de/alias/rss/spektrum-de-rss-feed/996406", lang: "German", country: "Germany", all: true, limit: 25 },
+  { name: "Futura Sciences", url: "https://www.futura-sciences.com/rss/actualites.xml", lang: "French", country: "France", all: true, limit: 25 },
+  { name: "Le Monde Sciences", url: "https://www.lemonde.fr/sciences/rss_full.xml", lang: "French", country: "France", all: true, limit: 20 },
+  { name: "El País Tecnología", url: "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/tecnologia/portada", lang: "Spanish", country: "Spain", limit: 25 },
+  { name: "ANSA Scienza", url: "https://www.ansa.it/canale_scienza_tecnica/notizie/scienza_tecnica_rss.xml", lang: "Italian", country: "Italy", all: true, limit: 20 },
+  { name: "Tweakers", url: "https://feeds.feedburner.com/tweakers/mixed", lang: "Dutch", country: "Netherlands", limit: 25 },
 ];
 
 // GDELT country names that differ from the map's names.
