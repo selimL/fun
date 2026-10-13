@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tech Breakthrough Radar</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="globe"></div>
+
+  <!-- Top left: most important breakthroughs -->
+  <section id="top-stories" class="panel">
+    <header class="panel-head">
+      <h2><span class="dot live"></span><span id="top-title">Top Breakthroughs</span></h2>
+      <button id="toggle-top" class="icon-btn" title="Collapse">–</button>
+    </header>
+    <ol id="top-list" class="news-list"></ol>
+  </section>
+
+  <!-- Top right: clock -->
+  <section id="clock" class="panel">
+    <div id="clock-time">--:--:--</div>
+    <div id="clock-date">&nbsp;</div>
+    <div id="clock-utc">&nbsp;</div>
+  </section>
+
+  <!-- Top centre: field filter -->
+  <nav id="topics" class="panel" aria-label="Fields"></nav>
+
+  <!-- Right: feed for the world or a selected country -->
+  <section id="feed" class="panel">
+    <header class="panel-head">
+      <h2 id="feed-title">Global Feed</h2>
+      <button id="feed-clear" class="icon-btn" title="Back to global feed" hidden>✕</button>
+    </header>
+    <div class="feed-tools">
+      <input id="feed-search" type="search" placeholder="Filter headlines…" autocomplete="off" />
+      <div class="chips" role="tablist">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="confirmed">Verified + corroborated</button>
+      </div>
+    </div>
+    <div id="feed-status" class="feed-status"></div>
+    <ul id="feed-list" class="news-list"></ul>
+  </section>
+
+  <!-- Bottom left: source status -->
+  <footer id="status" class="panel">
+    <span id="status-text">Starting…</span>
+    <button id="refresh" class="icon-btn" title="Refresh now">⟳</button>
+  </footer>
+
+  <div id="windows"></div>
+
+  <script src="vendor/globe.gl.min.js"></script>
+  <script src="vendor/topojson-client.min.js"></script>
+  <script src="countries.js"></script>
+  <script src="topics.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
