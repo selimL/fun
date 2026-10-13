@@ -12,7 +12,7 @@ def main(argv=None):
     ap.add_argument("--sim", action="store_true",
                     help="use the built-in virtual apartment instead of your Wi-Fi card")
     ap.add_argument("--backend", default="auto",
-                    choices=["auto", "nmcli", "iw", "netsh", "macos", "monitor"],
+                    choices=["auto", "windows", "nmcli", "iw", "netsh", "macos", "monitor"],
                     help="real scanner to use (default: pick one for this OS)")
     ap.add_argument("--iface", help="Wi-Fi interface for the iw / monitor backends, e.g. wlan0")
     ap.add_argument("--exponent", type=float, default=2.4,
@@ -44,7 +44,7 @@ def main(argv=None):
 
         try:
             scanner = make_scanner(args.backend, args.iface)
-        except RuntimeError as e:
+        except (RuntimeError, OSError) as e:
             print(f"error: {e}\n\nTip: try the simulation with  python -m wifi_radar --sim", file=sys.stderr)
             return 1
         app = None

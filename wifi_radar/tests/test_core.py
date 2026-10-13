@@ -138,3 +138,56 @@ def test_empty_home_has_no_phantom_people():
     model = WorldModel()
     _walk(world, model, ROUTE)
     assert model.confirmed_humans == []
+
+
+def test_windows_wlan_struct_layout_matches_sdk():
+    import ctypes
+
+    from wifi_radar.scanners import _wlan_structs
+
+    GUID, INFO, IFLIST, SSID, ENTRY, HEADER = _wlan_structs()
+    assert ctypes.sizeof(GUID) == 16
+    assert ctypes.sizeof(INFO) == 532
+    assert IFLIST.InterfaceInfo.offset == 8
+    assert ctypes.sizeof(ENTRY) == 360  # sizeof(WLAN_BSS_ENTRY) in the Windows SDK
+    assert ENTRY.lRssi.offset == 56
+    assert ENTRY.ulChCenterFrequency.offset == 92
+
+
+def test_windows_parse_bss_list_from_memory():
+    import ctypes
+
+    from wifi_radar.scanners import _wlan_structs, parse_bss_list
+
+    *_, ENTRY, HEADER = _wlan_structs()
+
+    class List(ctypes.Structure):
+        _fields_ = [("head", HEADER), ("entries", ENTRY * 2)]
+
+    lst = List()
+    lst.head.dwNumberOfItems = 2
+    e = lst.entries[0]
+    e.dot11Ssid.uSSIDLength = 7
+    e.dot11Ssid.ucSSID[:7] = list(b"EvWiFi5")
+    e.dot11Bssid[:] = [0xA4, 0x2B, 0xB0, 0x11, 0x22, 0x01]
+    e.lRssi = -57
+    e.ulChCenterFrequency = 5180000
+    lst.entries[1].lRssi = -80
+    lst.entries[1].ulChCenterFrequency = 2437000
+    obs = parse_bss_list(ctypes.addressof(lst), 1.0)
+    assert obs[0].name == "EvWiFi5" and obs[0].mac == "a4:2b:b0:11:22:01"
+    assert obs[0].rssi == -57 and obs[0].channel == 36
+    assert obs[1].name == "(hidden network)" and obs[1].channel == 6
+
+
+def test_parse_netsh_turkish():
+    out = """
+SSID 1 : SuperOnline_5G
+    Ağ türü                 : Altyapı
+    BSSID 1                 : a0:b1:c2:d3:e4:f5
+         Sinyal             : 82%
+         Radyo türü         : 802.11ac
+         Kanal              : 44
+"""
+    obs = parse_netsh(out, 0)
+    assert len(obs) == 1 and obs[0].rssi == -59 and obs[0].channel == 44

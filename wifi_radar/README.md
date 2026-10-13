@@ -71,9 +71,15 @@ the map is the scale bar in the corner.)
 | --- | --- | --- | --- | --- |
 | `nmcli` | Linux (NetworkManager) | access points | ~0.5 | no root, default on Linux |
 | `iw` | Linux | access points | ~0.5 | real dBm values, needs root and `--iface wlan0` |
-| `netsh` | Windows | access points | ~0.3 | default on Windows |
+| `windows` | Windows | access points | ~0.25 | native Wi-Fi API: real dBm, fresh scans, any Windows language; default on Windows |
+| `netsh` | Windows | access points | ~0.3 | fallback; shows cached results |
 | `macos` | macOS | access points (by name) | ~0.2 | macOS hides BSSIDs |
 | `monitor` | Linux + monitor-mode card | **everything**, including phones, laptops and IoT clients | many | `pip install scapy`, root |
+
+**Windows 11:** if the app says Windows blocked the scan, open
+Settings → Privacy & security → Location, and turn on both **Location
+services** and **Let desktop apps access your location**. Windows requires
+this for Wi-Fi scanning.
 
 Normal Wi-Fi cards can only list access points. To find **phones, laptops and
 other client devices**, and to get readings fast enough for motion and people

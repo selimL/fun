@@ -692,7 +692,13 @@ class App:
         scr.blit(self.font_small.render(src, True, DIM), (x0 + 16, y))
         y += 18
         if self.threaded and self.scanner.error:
-            scr.blit(self.font_small.render(self.scanner.error[:48], True, HUMAN), (x0 + 16, y))
+            for line in wrap_text(self.scanner.error, 46)[:6]:
+                scr.blit(self.font_small.render(line, True, HUMAN), (x0 + 16, y))
+                y += 16
+            y += 4
+        elif self.threaded and not self.model.devices:
+            scr.blit(self.font_small.render("Scanning... (first results take a few seconds)", True, DIM),
+                     (x0 + 16, y))
             y += 18
         sensing = self.model.motion_sensing_active(now)
         status = ("PAUSED" if self.paused else
@@ -776,6 +782,19 @@ class App:
             pts = [(gx + gw * i / (len(hist) - 1), gy + gh - (v - lo) / (hi - lo) * gh) for i, v in enumerate(hist)]
             pygame.draw.lines(scr, KIND_COLORS.get(d.kind, ACCENT), False, pts, 2)
             scr.blit(self.font_small.render(f"RSSI {hi:.0f}..{lo:.0f} dBm", True, DIM), (gx + 4, gy + 2))
+
+
+def wrap_text(text: str, width: int) -> list[str]:
+    lines, cur = [], ""
+    for word in text.split():
+        if cur and len(cur) + 1 + len(word) > width:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = f"{cur} {word}".strip()
+    if cur:
+        lines.append(cur)
+    return lines
 
 
 # ================================================================ icons

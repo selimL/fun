@@ -143,15 +143,186 @@ def parse_netsh(out: str, now: float) -> list[Observation]:
             continue
         if cur is None:
             continue
-        m = re.match(r"^Signal\s*:\s*(\d+)%", line)
-        if m:
+        # Match by value shape, not label: labels are translated (e.g. "Sinyal", "Kanal").
+        m = re.match(r"^[^:]+:\s*(\d+)\s*%$", line)
+        if m and cur["signal"] is None:
             cur["signal"] = percent_to_dbm(float(m.group(1)))
-        m = re.match(r"^Channel\s*:\s*(\d+)", line)
+            continue
+        m = re.match(r"^(Channel|Kanal|Canal)\s*:\s*(\d+)", line, re.I)
         if m:
-            cur["chan"] = int(m.group(1))
+            cur["chan"] = int(m.group(2))
     return [Observation(c["mac"], c["signal"], now, c["ssid"] or "(hidden network)",
                         guess_kind(c["ssid"], c["mac"], True), c["chan"], True)
             for c in obs if c["signal"] is not None]
+
+
+
+# ------------------------------------------------------- Windows (native API)
+WINDOWS_LOCATION_HELP = (
+    "Windows blocked the Wi-Fi scan. Turn on: Settings > Privacy & security > Location > "
+    "'Location services' AND 'Let desktop apps access your location', then restart WiFi Radar."
+)
+
+
+def freq_to_channel(mhz: float) -> int | None:
+    mhz = round(mhz)
+    if mhz == 2484:
+        return 14
+    if 2412 <= mhz <= 2472:
+        return (mhz - 2407) // 5
+    if 5150 <= mhz <= 5895:
+        return (mhz - 5000) // 5
+    if 5955 <= mhz <= 7115:
+        return (mhz - 5950) // 5
+    return None
+
+
+def bss_to_observation(ssid: bytes, bssid: bytes, rssi: int, freq_khz: int, now: float) -> Observation:
+    name = ssid.decode("utf-8", errors="replace")
+    mac = ":".join(f"{b:02x}" for b in bssid)
+    return Observation(mac, float(rssi), now, name or "(hidden network)",
+                       guess_kind(name, mac, True), freq_to_channel(freq_khz / 1000.0), True)
+
+
+def _wlan_structs():
+    import ctypes as C
+
+    class GUID(C.Structure):
+        _fields_ = [("Data1", C.c_uint32), ("Data2", C.c_uint16), ("Data3", C.c_uint16),
+                    ("Data4", C.c_ubyte * 8)]
+
+    class WLAN_INTERFACE_INFO(C.Structure):
+        _fields_ = [("InterfaceGuid", GUID), ("strInterfaceDescription", C.c_uint16 * 256),
+                    ("isState", C.c_uint32)]
+
+    class WLAN_INTERFACE_INFO_LIST(C.Structure):
+        _fields_ = [("dwNumberOfItems", C.c_uint32), ("dwIndex", C.c_uint32),
+                    ("InterfaceInfo", WLAN_INTERFACE_INFO * 1)]
+
+    class DOT11_SSID(C.Structure):
+        _fields_ = [("uSSIDLength", C.c_uint32), ("ucSSID", C.c_ubyte * 32)]
+
+    class WLAN_RATE_SET(C.Structure):
+        _fields_ = [("uRateSetLength", C.c_uint32), ("usRateSet", C.c_uint16 * 126)]
+
+    class WLAN_BSS_ENTRY(C.Structure):
+        _fields_ = [("dot11Ssid", DOT11_SSID), ("uPhyId", C.c_uint32),
+                    ("dot11Bssid", C.c_ubyte * 6), ("dot11BssType", C.c_uint32),
+                    ("dot11BssPhyType", C.c_uint32), ("lRssi", C.c_int32),
+                    ("uLinkQuality", C.c_uint32), ("bInRegDomain", C.c_ubyte),
+                    ("usBeaconPeriod", C.c_uint16), ("ullTimestamp", C.c_uint64),
+                    ("ullHostTimestamp", C.c_uint64), ("usCapabilityInformation", C.c_uint16),
+                    ("ulChCenterFrequency", C.c_uint32), ("wlanRateSet", WLAN_RATE_SET),
+                    ("ulIeOffset", C.c_uint32), ("ulIeSize", C.c_uint32)]
+
+    class WLAN_BSS_LIST_HEADER(C.Structure):
+        _fields_ = [("dwTotalSize", C.c_uint32), ("dwNumberOfItems", C.c_uint32)]
+
+    return GUID, WLAN_INTERFACE_INFO, WLAN_INTERFACE_INFO_LIST, DOT11_SSID, WLAN_BSS_ENTRY, WLAN_BSS_LIST_HEADER
+
+
+def parse_bss_list(addr: int, now: float) -> list[Observation]:
+    """Read a WLAN_BSS_LIST that lives at memory address ``addr``."""
+    import ctypes as C
+
+    *_, WLAN_BSS_ENTRY, HEADER = _wlan_structs()
+    head = HEADER.from_address(addr)
+    entries = (WLAN_BSS_ENTRY * head.dwNumberOfItems).from_address(addr + C.sizeof(HEADER))
+    obs = []
+    for e in entries:
+        n = min(e.dot11Ssid.uSSIDLength, 32)
+        obs.append(bss_to_observation(bytes(e.dot11Ssid.ucSSID[:n]), bytes(e.dot11Bssid),
+                                      e.lRssi, e.ulChCenterFrequency, now))
+    return obs
+
+
+class WlanApiScanner:
+    """Windows native Wi-Fi API (wlanapi.dll) via ctypes.
+
+    Unlike ``netsh`` it works in every Windows language, reports real dBm
+    and triggers a fresh scan every time instead of returning cached results.
+    """
+
+    name = "windows"
+    rate_hz = 0.25
+    sees_clients = False
+    ERROR_ACCESS_DENIED = 5
+
+    def __init__(self):
+        import ctypes as C
+        from ctypes import wintypes as W
+
+        if platform.system() != "Windows":
+            raise RuntimeError("The windows backend only works on Windows.")
+        self.C = C
+        self.GUID, _, self.IFLIST, *_ = _wlan_structs()
+        self.api = C.WinDLL("wlanapi.dll")
+        self.api.WlanOpenHandle.argtypes = [W.DWORD, C.c_void_p, C.POINTER(W.DWORD), C.POINTER(W.HANDLE)]
+        self.api.WlanEnumInterfaces.argtypes = [W.HANDLE, C.c_void_p, C.POINTER(C.c_void_p)]
+        self.api.WlanScan.argtypes = [W.HANDLE, C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p]
+        self.api.WlanGetNetworkBssList.argtypes = [W.HANDLE, C.c_void_p, C.c_void_p, C.c_uint32,
+                                                   W.BOOL, C.c_void_p, C.POINTER(C.c_void_p)]
+        self.api.WlanFreeMemory.argtypes = [C.c_void_p]
+        self.api.WlanCloseHandle.argtypes = [W.HANDLE, C.c_void_p]
+        for fn in ("WlanOpenHandle", "WlanEnumInterfaces", "WlanScan", "WlanGetNetworkBssList", "WlanCloseHandle"):
+            getattr(self.api, fn).restype = W.DWORD
+
+        version = W.DWORD()
+        self.handle = W.HANDLE()
+        err = self.api.WlanOpenHandle(2, None, C.byref(version), C.byref(self.handle))
+        if err:
+            raise RuntimeError(f"Could not open the Wi-Fi service (WlanOpenHandle error {err}). "
+                               "Is Wi-Fi turned on?")
+        self.guids = self._interfaces()
+        if not self.guids:
+            raise RuntimeError("No Wi-Fi adapter found. Is Wi-Fi turned on?")
+
+    def _interfaces(self):
+        C = self.C
+        ptr = C.c_void_p()
+        err = self.api.WlanEnumInterfaces(self.handle, None, C.byref(ptr))
+        if err:
+            raise RuntimeError(f"WlanEnumInterfaces error {err}")
+        try:
+            head = self.IFLIST.from_address(ptr.value)
+            n = head.dwNumberOfItems
+            info_t = type(head.InterfaceInfo[0])
+            infos = (info_t * n).from_address(ptr.value + self.IFLIST.InterfaceInfo.offset)
+            guids = []
+            for info in infos:
+                g = self.GUID()
+                C.memmove(C.byref(g), C.byref(info.InterfaceGuid), C.sizeof(g))
+                guids.append(g)
+            return guids
+        finally:
+            self.api.WlanFreeMemory(ptr)
+
+    def scan(self, x: float, y: float, now: float) -> list[Observation]:
+        C = self.C
+        for g in self.guids:
+            self.api.WlanScan(self.handle, C.byref(g), None, None, None)
+        time.sleep(3.0)  # Windows needs a few seconds to finish the scan
+        now = time.monotonic()
+        obs: dict[str, Observation] = {}
+        for g in self.guids:
+            ptr = C.c_void_p()
+            err = self.api.WlanGetNetworkBssList(self.handle, C.byref(g), None, 3, False, None, C.byref(ptr))
+            if err == self.ERROR_ACCESS_DENIED:
+                raise PermissionError(WINDOWS_LOCATION_HELP)
+            if err:
+                raise RuntimeError(f"WlanGetNetworkBssList error {err}")
+            try:
+                for o in parse_bss_list(ptr.value, now):
+                    obs[o.mac] = o
+            finally:
+                self.api.WlanFreeMemory(ptr)
+        return list(obs.values())
+
+    def close(self):
+        try:
+            self.api.WlanCloseHandle(self.handle, None)
+        except Exception:
+            pass
 
 
 # --------------------------------------------------------------------- macOS
@@ -313,7 +484,10 @@ class ThreadedScanner:
                         self._results.append(((x + x2) / 2, (y + y2) / 2, obs))
                     self.error = None
                 except Exception as e:  # keep scanning; show the error in the UI
-                    self.error = f"{type(e).__name__}: {e}"
+                    msg = str(e) if isinstance(e, (PermissionError, RuntimeError)) else f"{type(e).__name__}: {e}"
+                    if msg != self.error:
+                        print("WiFi Radar:", msg, flush=True)
+                    self.error = msg
             self._stop.wait(max(0.05, period - (time.monotonic() - t0)))
 
     def poll(self) -> list[tuple[float, float, list[Observation]]]:
@@ -336,7 +510,10 @@ def auto_scanner(iface: str | None = None):
             return IwScanner(iface)
         raise RuntimeError("No supported scanner found: install NetworkManager (nmcli) or use --backend iw --iface wlan0")
     if system == "Windows":
-        return NetshScanner()
+        try:
+            return WlanApiScanner()
+        except OSError:
+            return NetshScanner()
     if system == "Darwin":
         return MacScanner()
     raise RuntimeError(f"Unsupported platform: {system}")
@@ -351,6 +528,8 @@ def make_scanner(backend: str, iface: str | None = None):
         if not iface:
             raise RuntimeError("--backend iw needs --iface")
         return IwScanner(iface)
+    if backend == "windows":
+        return WlanApiScanner()
     if backend == "netsh":
         return NetshScanner()
     if backend == "macos":
